@@ -78,6 +78,68 @@ except ImportError:
 
 ERR_NO_CEXT = "C Extension not available"
 
+# --------------------------------Bug #91974-------------------------------------------------
+from mysql.connector import connect
+from mysql.connector.cursor import MySQLCursorPrepared
+import struct
+
+class Bug91974(tests.MySQLConnectorTests):
+    def __q(self, query, cnx):
+        c = cnx.cursor(cursor_class=MySQLCursorPrepared)
+        c.execute(query)
+        for r in c:
+            print(r)
+
+    def test_crash_on_time_0value(self):
+        # python3 unittests.py -T tests.test_bugs.Bug91974.test_crash_on_time_0value --use-external-server --password <mypassword> --verbosity 2
+        """
+        buffer issue. 
+        """
+        cnx = connect(**tests.get_mysql_config())
+        try:
+            self.__q("create database db", cnx)
+        except mysql.connector.errors.DatabaseError:
+            self.__q("drop database db", cnx)
+            self.__q("create database db", cnx)
+        self.__q("create table db.t(a time)", cnx)
+        try:
+            for i in range(60):
+                self.__q(f"insert into db.t values({i})", cnx) 
+        except struct.error:
+            self.fail()
+        else:
+            self.__q("select * from db.t", cnx)
+        finally:
+            if cnx:
+                cnx.close()
+
+    def test_crash_binary_column(self):
+        # python3 unittests.py -T tests.test_bugs.Bug91974.test_crash_binary_column --use-external-server --password <mypassword> --verbosity 2
+        """
+        decoding issue.
+        """
+        hexcode_samples = ["D0BFD000000000000000000000000000", "C2", "F0", 
+                           "436F636F6E75742070616C6D", "4361747320616E6420646F6773",
+                           "41", "6765656B73666F726765656B73"]
+        cnx = connect(**tests.get_mysql_config())
+        try:
+            self.__q("create database db", cnx)
+        except mysql.connector.errors.DatabaseError:
+            self.__q("drop database db", cnx)
+            self.__q("create database db", cnx)
+        self.__q("create table db.t(a binary(16))", cnx)
+        try:
+            for hexcode in hexcode_samples:
+                self.__q(f"insert into db.t values(unhex('{hexcode}'))", cnx) 
+        except UnicodeDecodeError:
+            self.fail()
+        else:
+            self.__q("select * from db.t", cnx)
+        finally:
+            if cnx:
+                cnx.close()
+# -------------------------------------------------------------------------------------------------
+
 
 class Bug437972Tests(tests.MySQLConnectorTests):
     def test_windows_tcp_connection(self):

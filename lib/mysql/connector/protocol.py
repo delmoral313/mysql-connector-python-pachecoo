@@ -463,14 +463,28 @@ class MySQLProtocol(object):
         mcs = 0
         if length > 8:
             mcs = struct.unpack('<I', data[8:])[0]
-        days = struct.unpack('<I', data[1:5])[0]
-        if data[0] == 1:
+
+        """
+        Patch bug 91974:
+        * Here i don't know what the default configuration must be when something goes wrong. 
+        * I'm using a reasonable default (zeros). 
+        * This could be changed easily moving forward. 
+        """
+        # buffer of size max(8, len(data)) padded with zeros
+        data_padded = bytearray(max(8, len(data))) 
+        # import information from data to data_padded.
+        for i in range(len(data)):
+            data_padded[i] = data[i]
+        # little-endian and unsigned integer: unpacking requires a 4-byte buffer.
+        days = struct.unpack('<I', data_padded[1:5])[0]
+
+        if data_padded[0] == 1:
             days *= -1
         tmp = datetime.timedelta(days=days,
-                                 seconds=data[7],
+                                 seconds=data_padded[7],
                                  microseconds=mcs,
-                                 minutes=data[6],
-                                 hours=data[5])
+                                 minutes=data_padded[6],
+                                 hours=data_padded[5])
 
         return (packet[length + 1:], tmp)
 
@@ -479,7 +493,6 @@ class MySQLProtocol(object):
         null_bitmap_length = (len(fields) + 7 + 2) // 8
         null_bitmap = [int(i) for i in packet[0:null_bitmap_length]]
         packet = packet[null_bitmap_length:]
-
         values = []
         for pos, field in enumerate(fields):
             if null_bitmap[int((pos+2)/8)] & (1 << (pos + 2) % 8):
@@ -505,8 +518,7 @@ class MySQLProtocol(object):
                 values.append(value)
             else:
                 (packet, value) = utils.read_lc_string(packet)
-                values.append(value.decode(charset))
-
+                values.append(value.decode(charset, errors="ignore"))
         return tuple(values)
 
     def read_binary_result(self, sock, columns, count=1, charset='utf-8'):
